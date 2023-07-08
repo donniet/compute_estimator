@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+<head>
+<title>Compute Cost Estimator</title>
+<script type="text/javascript">
+
+const axisSize = 50;
+
+const vertexShader = `
+precision highp float;
+
+attribute vec2 aPosition;
+
+uniform float uComputeMin;
+uniform float uComputeMax;
+uniform float uBandwidthMin;
+uniform float uBandwidthMax;
+
+varying vec2 vCoordinate;
+
+void main() {
+    gl_Position = vec4(aPosition.xy, 0., 0.);
+
+    vCoordinate.xy = (aPosition.xy + 1.)/2.;
+    vCoordinate.y = vCoordinate.y * (uComputeMax - uComputeMin) + uComputeMin;
+    vCoordinate.x = vCoordinate.x * (uBandwidthMax - uBandwidthMin) + uBandwidthMin;
+}
+`
+
+const fragmentShader = `
+precision highp float;
+
+uniform float uComputeMin;
+uniform float uComputeMax;
+uniform float uBandwidthMin;
+uniform float uBandwidthMax;
+
+varying vec2 vCoordinate;
+
+float edgeCost(float compute, float bandwidth) {
+    //     upfront       cost per cycle                cost of bandwidth
+    return 0.5 * compute +         2. * compute / bandwidth * 1. +      0.; // no bandwidth cost, compute is done as close to input as possible
+}
+
+float dataCenterCost(float compute, float bandwidth) {
+    //     upfront       cost per cycle                cost of bandwidth
+    return 0.7 * compute  +    0.75 * compute / bandwidth * 1. + 0.1 * bandwidth;
+}
+
+float cloudCost(float compute, float bandwidth) {
+    return 0.5 * compute / bandwidth * 1. + 1. * bandwidth;
+}
+
+void main() {
+    gl_FragColor = vec4(1., 0., 0., 1.);
+}
+`
+
+
+function loadShader(gl, type, source) {
+  const shader = gl.createShader(type);
+
+  gl.shaderSource(shader, source);
+
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.log('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+
+  return shader;
+}
+
+function compileShaders(gl, vert, frag) {
+    v = loadShader(gl, gl.VERTEX_SHADER, vert);
+    f = loadShader(gl, gl.FRAGMENT_SHADER, frag);
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, v);
+    gl.attachShader(prog, f);
+    gl.linkProgram(prog);
+
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(prog));
+        return null;
+    }
+
+    return prog;
+}
+
+function setupShader(gl, d) {
+    let program = compileShaders(gl, d.vertex, d.fragment);
+    locations = {};
+    attribs = d.attributes || [];
+    uniforms = d.uniforms || [];
+    attribs.forEach(a => locations[a] = gl.getAttribLocation(program, a));
+    uniforms.forEach(u => locations[u] = gl.getUniformLocation(program, u));
+    return {
+        program: program,
+        locations: locations,
+    };
+}
+
+function setupGraph(canvas, horiz, vert) {
+
+    onresize = function(e) {
+        canvas.style = `position:absolute;left:${axisSize}px;top:0`;
+        canvas.width = window.innerWidth - axisSize;
+        canvas.height = window.innerHeight - axisSize;
+
+        horiz.style = `position:absolute;left:${axisSize};bottom:0;`;
+        horiz.width = canvas.width;
+        horiz.height = axisSize;
+
+        vert.style = `postioin:absolute;left:0;top:0;`;
+        vert.width = axisSize;
+        vert.height = canvas.height;
+        
+    }
+
+    window.addEventListener('onresize', onresize);
+    onresize();
+}
+
+
+function load() {
+    canvas = document.getElementById("graph");
+    horiz = document.getElementById("horizontalAxis");
+    vert = document.getElementById("verticalAxis");
+
+    let bandwidthMin = 1, bandwidthMax = 10000000000;
+    let computeMin = 1, computeMax = 10000000000000;
+
+    setupGraph(canvas, horiz, vert);
+    drawHorizontalAxis()
+    
+    gl = canvas.getContext('webgl2');
+    var OES_element_index_uint = gl.getExtension('OES_element_index_uint');
+
+
+    let prog = setupShader(gl, {
+        vertex: vertexShader, fragment: fragmentShader,
+        attributes: ['aPosition'],
+        uniforms: ['uComputeMin','uComputeMax','uBandwidthMin','uBandwidthMax']
+    });
+
+    var positionArray = new Float32Array([-1,-1,-1,1,1,1,1,-1]);
+    let positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positionArray, gl.STATIC_DRAW);
+
+    gl.clearColor(1, 1, 1, 1.0);  // Clear to black, fully opaque
+    gl.clearDepth(1.0);                 // Clear everything
+    // gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+    // gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
+
+    // Clear the canvas before we start drawing on it.
+
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(prog.program);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(prog.locations.aPosition, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(prog.locations.aPosition);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4*2);
+}
+
+</script>
+</head>
+<body onload="load()">
+    <canvas id="graph"></canvas>
+    <canvas id="verticalAxis"></canvas>
+    <canvas id="horizontalAxis"></canvas>
+
+</body>
+</html>
